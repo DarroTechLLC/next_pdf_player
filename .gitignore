@@ -1,12 +1,26 @@
+# dependencies
 node_modules/
 .next/
 out/
 .vercel/
 .turbo/
+
+# env files
 .env*
 !.env.example
+
+# system files
 .DS_Store
+
+# logs
 logs/
 *.log
+
+# coverage
 coverage/
+
+# package lock
 pnpm-lock.yaml
+
+# Ignore all PDFs
+*.pdf
