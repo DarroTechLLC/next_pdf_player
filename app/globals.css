@@ -1,0 +1,10 @@
+/* Keep it minimal; layout is handled by styled-components */
+:root {
+  color-scheme: light dark;
+}
+
+html, body, #__next {
+  height: 100%;
+}
+
+* { box-sizing: border-box; }
