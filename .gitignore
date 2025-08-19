@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+.vercel/
+.turbo/
+.env*
+!.env.example
+.DS_Store
+logs/
+*.log
+coverage/
+pnpm-lock.yaml
