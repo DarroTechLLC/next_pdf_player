@@ -54,18 +54,18 @@ export default function Home() {
       abortControllerRef.current.abort();
     }
     abortControllerRef.current = new AbortController();
-    
+
     console.log("Client: Fetching book list");
     try {
       const response = await fetch("/api/books", {
         signal: abortControllerRef.current.signal
       });
-      
+
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(`Failed to fetch books: ${response.status} ${response.statusText}${data.details ? ` - ${data.details}` : ''}`);
       }
-      
+
       const data = await response.json();
       console.log(`Client: Received ${data.books?.length || 0} books`);
       setBooks(data.books || []);
@@ -81,23 +81,23 @@ export default function Home() {
       abortControllerRef.current.abort();
     }
     abortControllerRef.current = new AbortController();
-    
+
     setChapters([]);
     setActiveId(undefined);
     setText("");
     setLoading(true);
-    
+
     console.log(`Client: Fetching chapters for book: ${bookName}`);
     try {
       const response = await fetch(`/api/books/${encodeURIComponent(bookName)}/chapters`, {
         signal: abortControllerRef.current.signal
       });
-      
+
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(`Failed to fetch chapters: ${response.status} ${response.statusText}${data.details ? ` - ${data.details}` : ''}`);
       }
-      
+
       const data = await response.json();
       console.log(`Client: Received ${data.chapters?.length || 0} chapters`);
       setChapters(data.chapters || []);
@@ -180,7 +180,7 @@ export default function Home() {
       <Card>
         <H>🎧 Reader</H>
         {text ? (
-          <Reader text={text} />
+          <Reader text={text} book={book} activeChapter={activeId} />
         ) : (
           <p>Select a chapter to read.</p>
         )}

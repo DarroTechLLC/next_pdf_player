@@ -429,6 +429,11 @@ detect-libc@^2.0.0:
   resolved "https://registry.npmmirror.com/detect-libc/-/detect-libc-2.0.4.tgz#f04715b8ba815e53b4d8109655b6508a6865a7e8"
   integrity sha512-3UDv+G9CsCKO1WKMGw9fwq/SWJYbI0c5Y7LU1AXYoDdbhE2AHQ6N6Nb34sG8Fj7T5APy8qXDCKuuIHd1BR0tVA==
 
+dommatrix@^1.0.3:
+  version "1.0.3"
+  resolved "https://registry.npmmirror.com/dommatrix/-/dommatrix-1.0.3.tgz#e7c18e8d6f3abdd1fef3dd4aa74c4d2e620a0525"
+  integrity sha512-l32Xp/TLgWb8ReqbVJAFIvXmY7go4nTxxlWiAFyhoQw9RKEOHBZNnyGvJWqDVSPmq3Y9HlM4npqF/T6VMOXhww==
+
 dotenv@^16.4.5:
   version "16.6.1"
   resolved "https://registry.npmmirror.com/dotenv/-/dotenv-16.6.1.tgz#773f0e69527a8315c7285d5ee73c4459d20a8020"
@@ -902,6 +907,11 @@ path2d@^0.2.1:
   version "0.2.2"
   resolved "https://registry.npmmirror.com/path2d/-/path2d-0.2.2.tgz#cc85d61ed7827e7863a2ee36713d4b5315a3d85d"
   integrity sha512-+vnG6S4dYcYxZd+CZxzXCNKdELYZSKfohrk98yajCo1PtRoDgCTrrwOvK1GT0UoAdVszagDVllQc0U1vaX4NUQ==
+
+path2d@^0.3.1:
+  version "0.3.1"
+  resolved "https://registry.npmmirror.com/path2d/-/path2d-0.3.1.tgz#003ccd8ce04b9d01cb408eda44c1a5618a2aa7fe"
+  integrity sha512-GSruf/RONdlJgrz3fppp6Fro1r9xHdT2Uxw+rrTvmfwHSPl3AZwvnXVUJmyzsrOUEKl5tZDWCKLgdaMsMMUC+A==
 
 pdfjs-dist@4.7.76:
   version "4.7.76"
