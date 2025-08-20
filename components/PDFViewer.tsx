@@ -5,20 +5,6 @@ import styled from 'styled-components';
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist/types/src/display/api';
 
-// Import the worker directly - this will be handled by webpack
-// This import is only used in the browser
-let pdfWorkerSrc = '';
-if (typeof window !== 'undefined') {
-  try {
-    // Try to import the worker directly
-    // This will be processed by webpack
-    pdfWorkerSrc = require('pdfjs-dist/build/pdf.worker.min.js');
-    console.log('Worker imported directly:', pdfWorkerSrc);
-  } catch (e) {
-    console.warn('Failed to import worker directly:', e);
-  }
-}
-
 // Polyfill for Path2D if not available
 if (typeof Path2D === 'undefined') {
   try {
@@ -45,229 +31,9 @@ if (typeof DOMMatrix === 'undefined') {
   }
 }
 
-// Set the worker source to use a local file with fallbacks
-const jsWorkerSrc = `/js/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-const mjsWorkerSrc = `/js/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-// CDN fallback as last resort
-const cdnWorkerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
+// Set the worker source directly to the .mjs file which we know works
+pdfjsLib.GlobalWorkerOptions.workerSrc = `/js/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
-// Use the directly imported worker if available, otherwise fall back to .mjs version
-if (pdfWorkerSrc) {
-  console.log('Using directly imported worker');
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
-} else {
-  console.log('Using .mjs worker file');
-  pdfjsLib.GlobalWorkerOptions.workerSrc = mjsWorkerSrc;
-}
-
-// Add a function to check if the worker file exists and set fallback if needed
-const checkWorkerFileExists = async () => {
-  try {
-    // First try the .mjs version (preferred for ES modules)
-    let response = await fetch(mjsWorkerSrc, { method: 'HEAD' });
-
-    if (response.ok) {
-      console.log(`Worker file exists at ${mjsWorkerSrc}`);
-      pdfjsLib.GlobalWorkerOptions.workerSrc = mjsWorkerSrc;
-      return;
-    } 
-
-    console.warn(`Worker file not found at ${mjsWorkerSrc}. Status: ${response.status}`);
-    console.log(`Trying fallback worker file at ${jsWorkerSrc}`);
-
-    // Try the .js version as fallback
-    response = await fetch(jsWorkerSrc, { method: 'HEAD' });
-
-    if (response.ok) {
-      console.log(`Fallback worker file exists at ${jsWorkerSrc}`);
-      pdfjsLib.GlobalWorkerOptions.workerSrc = jsWorkerSrc;
-      return;
-    }
-
-    console.error(`Fallback worker file not found at ${jsWorkerSrc}. Status: ${response.status}`);
-    console.log(`Trying CDN fallback worker file at ${cdnWorkerSrc}`);
-
-    // Try the CDN version as a last resort
-    try {
-      response = await fetch(cdnWorkerSrc, { method: 'HEAD' });
-
-      if (response.ok) {
-        console.log(`CDN fallback worker file exists at ${cdnWorkerSrc}`);
-        pdfjsLib.GlobalWorkerOptions.workerSrc = cdnWorkerSrc;
-        return;
-      }
-
-      console.error(`CDN fallback worker file not found at ${cdnWorkerSrc}. Status: ${response.status}`);
-    } catch (cdnError) {
-      console.error(`Error checking CDN worker file: ${cdnError}`);
-    }
-
-    console.error('All worker files are missing. PDF rendering may fail.');
-  } catch (error) {
-    console.error(`Error checking worker files: ${error}`);
-
-    // If there's an error checking local files, try the CDN as a last resort
-    console.log(`Falling back to CDN worker file due to error: ${cdnWorkerSrc}`);
-    pdfjsLib.GlobalWorkerOptions.workerSrc = cdnWorkerSrc;
-  }
-};
-
-// Function to preload the worker file
-const preloadWorkerFile = (src: string) => {
-  return new Promise<boolean>((resolve) => {
-    if (typeof window === 'undefined') {
-      resolve(false);
-      return;
-    }
-
-    console.log(`Preloading worker file: ${src}`);
-    const link = document.createElement('link');
-    link.rel = 'preload';
-    link.as = 'script';
-    link.href = src;
-    link.onload = () => {
-      console.log(`Successfully preloaded: ${src}`);
-      resolve(true);
-    };
-    link.onerror = () => {
-      console.warn(`Failed to preload: ${src}`);
-      resolve(false);
-    };
-    document.head.appendChild(link);
-  });
-};
-
-// Function to load the worker file as a module
-const loadWorkerAsModule = (src: string) => {
-  return new Promise<boolean>((resolve) => {
-    if (typeof window === 'undefined') {
-      resolve(false);
-      return;
-    }
-
-    console.log(`Loading worker script as module: ${src}`);
-    const script = document.createElement('script');
-    script.src = src;
-    script.type = 'module';
-    script.async = true;
-
-    script.onload = () => {
-      console.log(`Successfully loaded worker script as module: ${src}`);
-      resolve(true);
-    };
-    script.onerror = () => {
-      console.warn(`Failed to load worker script as module: ${src}`);
-      resolve(false);
-    };
-    document.head.appendChild(script);
-  });
-};
-
-// Function to load the worker file as a regular script
-const loadWorkerAsScript = (src: string) => {
-  return new Promise<boolean>((resolve) => {
-    if (typeof window === 'undefined') {
-      resolve(false);
-      return;
-    }
-
-    console.log(`Loading worker script as regular script: ${src}`);
-    const script = document.createElement('script');
-    script.src = src;
-    script.async = true;
-
-    script.onload = () => {
-      console.log(`Successfully loaded worker script as regular script: ${src}`);
-      resolve(true);
-    };
-    script.onerror = () => {
-      console.warn(`Failed to load worker script as regular script: ${src}`);
-      resolve(false);
-    };
-    document.head.appendChild(script);
-  });
-};
-
-// Function to try loading the worker file in different ways
-const loadWorkerScript = async (src: string) => {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  console.log(`Attempting to load worker script: ${src}`);
-
-  // For .mjs files or local .js files, try loading as module first
-  if (src.endsWith('.mjs') || (src.endsWith('.js') && !src.includes('unpkg.com'))) {
-    console.log('Trying to load as module first');
-    const moduleSuccess = await loadWorkerAsModule(src);
-    if (moduleSuccess) {
-      return true;
-    }
-    console.log('Module loading failed, trying as regular script');
-  }
-
-  // Try loading as regular script as fallback
-  return await loadWorkerAsScript(src);
-};
-
-// Check if running in browser environment
-if (typeof window !== 'undefined') {
-  // Execute the check after component mounts
-  setTimeout(async () => {
-    // Skip the check if we're using the directly imported worker
-    if (!pdfWorkerSrc) {
-      await checkWorkerFileExists();
-    }
-
-    // Get the worker source that was selected
-    let workerSrc = pdfjsLib.GlobalWorkerOptions.workerSrc;
-
-    // Skip preloading and direct loading if we're using the directly imported worker
-    if (!pdfWorkerSrc) {
-      // First try to preload the worker file
-      await preloadWorkerFile(workerSrc);
-
-      // Then try to directly load the worker script
-      let scriptLoaded = await loadWorkerScript(workerSrc);
-
-      if (scriptLoaded) {
-        console.log(`Worker script loaded successfully: ${workerSrc}`);
-      } else {
-        console.warn(`Worker script loading failed, trying CDN fallback`);
-
-        // If local worker files fail, try the CDN version
-        workerSrc = cdnWorkerSrc;
-        pdfjsLib.GlobalWorkerOptions.workerSrc = cdnWorkerSrc;
-
-        await preloadWorkerFile(cdnWorkerSrc);
-        scriptLoaded = await loadWorkerScript(cdnWorkerSrc);
-
-        if (scriptLoaded) {
-          console.log(`CDN worker script loaded successfully: ${cdnWorkerSrc}`);
-        } else {
-          console.warn(`All worker script loading attempts failed, falling back to PDF.js built-in loading mechanism`);
-        }
-      }
-    } else {
-      console.log(`Using directly imported worker: ${workerSrc}`);
-    }
-
-    console.log(`Using worker file: ${workerSrc}`);
-
-    // Add a global error handler to catch worker initialization errors
-    window.addEventListener('error', (event) => {
-      if (event.filename && event.filename.includes('pdf.worker')) {
-        console.error(`Worker error detected: ${event.message}`);
-
-        // If we're not already using the CDN and there's a worker error, try the CDN
-        if (!pdfjsLib.GlobalWorkerOptions.workerSrc.includes('unpkg.com')) {
-          console.warn('Switching to CDN worker due to error');
-          pdfjsLib.GlobalWorkerOptions.workerSrc = cdnWorkerSrc;
-        }
-      }
-    });
-  }, 1000);
-}
 
 const PDFContainer = styled.div`
   border: 1px solid #ddd;
@@ -348,9 +114,9 @@ export default function PDFViewer({ pdfPath, currentPage = 1, onPageChange }: PD
 
   // Load the PDF
   useEffect(() => {
-    const loadPDF = async (retryCount = 0) => {
+    const loadPDF = async () => {
       setError(null);
-      console.log(`Loading PDF from path: ${pdfPath} (attempt ${retryCount + 1})`);
+      console.log(`Loading PDF from path: ${pdfPath}`);
       console.log(`PDF.js version: ${pdfjsLib.version}`);
       console.log(`Worker source: ${pdfjsLib.GlobalWorkerOptions.workerSrc}`);
 
@@ -369,37 +135,10 @@ export default function PDFViewer({ pdfPath, currentPage = 1, onPageChange }: PD
 
         setPdf(pdfDoc);
         setTotalPages(pdfDoc.numPages);
-        console.log(`Starting to render page ${currentPage}`);
-        renderPage(currentPage);
+        // Don't call renderPage here, it will be called by the useEffect below
       } catch (error) {
         console.error('Error loading PDF:', error);
-        console.error('Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
-
-        // Check if the error is related to the worker
-        const errorStr = String(error);
-        const isWorkerError = errorStr.includes('worker') || 
-                             errorStr.includes('module') || 
-                             errorStr.includes('export');
-
-        if (isWorkerError && retryCount < 2) {
-          console.warn(`Worker-related error detected, retrying with different worker configuration (attempt ${retryCount + 2})`);
-
-          // If not already using CDN, switch to it
-          if (!pdfjsLib.GlobalWorkerOptions.workerSrc.includes('unpkg.com')) {
-            console.log('Switching to CDN worker for retry');
-            pdfjsLib.GlobalWorkerOptions.workerSrc = cdnWorkerSrc;
-          } else {
-            // If already using CDN, try without type="module"
-            console.log('Already using CDN, trying different loading approach');
-          }
-
-          // Wait a bit before retrying
-          setTimeout(() => {
-            loadPDF(retryCount + 1);
-          }, 1000);
-        } else {
-          setError(`Failed to load PDF: ${error.message || 'Unknown error'}. Please try again or check if the file is valid.`);
-        }
+        setError(`Failed to load PDF: ${error.message || 'Unknown error'}. Please try again or check if the file is valid.`);
       }
     };
 
@@ -414,11 +153,19 @@ export default function PDFViewer({ pdfPath, currentPage = 1, onPageChange }: PD
     };
   }, [pdfPath]);
 
+  // Render the PDF when it's loaded or when the current page changes
+  useEffect(() => {
+    if (pdf && !pageRendering) {
+      console.log(`PDF loaded, rendering page ${pageNum}`);
+      renderPage(pageNum);
+    }
+  }, [pdf, pageNum]);
+
   // Update page when currentPage prop changes
   useEffect(() => {
     if (currentPage !== pageNum && !pageRendering) {
       setPageNum(currentPage);
-      renderPage(currentPage);
+      // Don't call renderPage here, it will be called by the useEffect above
     } else if (pageRendering) {
       setPageNumPending(currentPage);
     }
@@ -498,7 +245,7 @@ export default function PDFViewer({ pdfPath, currentPage = 1, onPageChange }: PD
     const newPageNum = pageNum + offset;
     if (newPageNum >= 1 && newPageNum <= totalPages && !pageRendering) {
       setPageNum(newPageNum);
-      renderPage(newPageNum);
+      // Don't call renderPage here, it will be called by the useEffect
       if (onPageChange) {
         onPageChange(newPageNum);
       }
@@ -537,7 +284,7 @@ export default function PDFViewer({ pdfPath, currentPage = 1, onPageChange }: PD
               const num = parseInt(pageInput);
               if (!isNaN(num) && num >= 1 && num <= totalPages) {
                 setPageNum(num);
-                renderPage(num);
+                // Don't call renderPage here, it will be called by the useEffect
                 if (onPageChange) onPageChange(num);
               }
               setPageInput('');
