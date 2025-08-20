@@ -7,11 +7,14 @@
     "start": "next start -p 3000"
   },
   "dependencies": {
+    "@types/natural": "^6.0.1",
+    "natural": "^8.1.0",
     "next": "14.2.5",
+    "pdfjs-dist": "4.7.76",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "styled-components": "6.1.11",
-    "pdfjs-dist": "4.7.76"
+    "styled-components": "^6.1.19",
+    "tslib": "^2.8.1"
   },
   "devDependencies": {
     "@types/node": "^20.12.12",

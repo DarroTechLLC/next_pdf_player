@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import styled, { css } from "styled-components";
+import styled from "styled-components";
+import FormattedText from './FormattedText';
 
 const Wrap = styled.div`
   display: grid;
@@ -29,13 +30,6 @@ const TextBox = styled.div`
   overflow: auto;
   line-height: 1.75;
   font-size: 1.1rem;
-`;
-
-const Word = styled.span<{ $active?: boolean; $recent?: boolean }>`
-  padding: .1rem .2rem;
-  border-radius: .35rem;
-  ${p => p.$active && css`background: #ffd54f;`}
-  ${p => p.$recent && css`background: rgba(255, 213, 79, .35);`}
 `;
 
 function chunkSentences(text: string, maxLen = 1200): string[] {
@@ -76,23 +70,38 @@ export default function Reader({
   const abortRef = useRef<boolean>(false);
   const queueRef = useRef<SpeechSynthesisUtterance[]>([]);
   const charBaseRef = useRef<number>(0);
-  // Add these new refs to track pause position
   const pausePositionRef = useRef<{ charBase: number; currentWord: number } | null>(null);
   const remainingChunksRef = useRef<string[]>([]);
 
   // Build word list & index mapping
-  const { words, wordOffsets } = useMemo(() => {
-    // Normalize whitespace once
-    const normalized = text.replace(/\s+/g, " ").trim();
-    const arr = normalized.split(" ");
+  const { words, wordOffsets, plainText } = useMemo(() => {
+    // First, extract plain text without markdown formatting
+    const plainText = text
+      .replace(/^#+\s+/gm, '') // Remove heading markers
+      .replace(/^>\s+/gm, '')  // Remove quote markers
+      .replace(/^•\s+/gm, '')  // Remove bullet points
+      .replace(/^---\n|\n---$/g, '') // Remove sidebar markers
+      .replace(/\n\n/g, ' ')   // Replace double newlines with space
+      .replace(/\s+/g, ' ')    // Normalize whitespace
+      .trim();
+
+    // Now split into words and calculate offsets based on plain text
+    const arr = plainText.split(" ");
     const offsets: number[] = [];
     let pos = 0;
     for (const w of arr) {
       offsets.push(pos);
       pos += w.length + 1; // + space
     }
-    return { words: arr, wordOffsets: offsets };
+    return { words: arr, wordOffsets: offsets, plainText };
   }, [text]);
+
+  // Calculate recent words for highlighting
+  const recentWordIdxs = useMemo(() => {
+    if (currentWordIdx < 0) return [];
+    return Array.from({ length: 5 }, (_, i) => currentWordIdx - i - 1)
+      .filter(idx => idx >= 0);
+  }, [currentWordIdx]);
 
   // Voices
   useEffect(() => {
@@ -138,41 +147,34 @@ export default function Reader({
     queueRef.current = [];
     charBaseRef.current = 0;
     setCurrentWordIdx(-1);
-    // Clear pause position when stopping
     pausePositionRef.current = null;
     remainingChunksRef.current = [];
   }, []);
 
   const pause = useCallback(() => {
     if (speechSynthesis.speaking && !speechSynthesis.paused) {
-      // Save current position before pausing
       pausePositionRef.current = {
         charBase: charBaseRef.current,
         currentWord: currentWordIdx
       };
-      
-      // Calculate remaining chunks from current position
-      const allChunks = chunkSentences(words.join(" "));
+
+      const allChunks = chunkSentences(plainText);
       let charCount = 0;
       let remainingChunks: string[] = [];
-      
+
       for (let i = 0; i < allChunks.length; i++) {
         if (charCount <= charBaseRef.current && charCount + allChunks[i].length > charBaseRef.current) {
-          // Found current chunk, save remaining ones
           remainingChunks = allChunks.slice(i);
           break;
         }
         charCount += allChunks[i].length + 1;
       }
-      
+
       remainingChunksRef.current = remainingChunks;
-      
-      console.log('Pause: saved position:', pausePositionRef.current, 'remaining chunks:', remainingChunks);
-      
       speechSynthesis.pause();
       setPaused(true);
     }
-  }, [currentWordIdx, words]);
+  }, [currentWordIdx, words, plainText]);
 
   const resume = useCallback(() => {
     if (speechSynthesis.paused) {
@@ -183,24 +185,17 @@ export default function Reader({
 
   const play = useCallback(() => {
     if (!text.trim()) return;
-    
-    console.log('Play called, pausePosition:', pausePositionRef.current, 'remainingChunks:', remainingChunksRef.current, 'paused:', paused, 'speaking:', speechSynthesis.speaking);
-    
-    // If we have a saved pause position and we're paused, resume from there
+
     if (paused && pausePositionRef.current && remainingChunksRef.current.length > 0) {
-      console.log('Resuming from pause position');
-      
-      // Cancel any current speech synthesis
       speechSynthesis.cancel();
-      
+
       const { charBase, currentWord } = pausePositionRef.current;
       charBaseRef.current = charBase;
       setCurrentWordIdx(currentWord);
-      
-      // Resume from where we left off
+
       const chosen = voices.find(v => v.name === voiceName) || voices[0];
       const queue: SpeechSynthesisUtterance[] = [];
-      
+
       for (const chunk of remainingChunksRef.current) {
         const u = new SpeechSynthesisUtterance(chunk);
         if (chosen) u.voice = chosen;
@@ -240,12 +235,10 @@ export default function Reader({
       return;
     }
 
-    console.log('Starting from beginning');
-    // Normal play from beginning
     stopAll();
     abortRef.current = false;
 
-    const chunks = chunkSentences(words.join(" "));
+    const chunks = chunkSentences(plainText);
     const chosen = voices.find(v => v.name === voiceName) || voices[0];
 
     let globalBase = 0;
@@ -269,7 +262,7 @@ export default function Reader({
         if (abortRef.current) return;
         globalBase += chunk.length + 1;
         charBaseRef.current = globalBase;
-        
+
         if (u === queue[queue.length - 1]) {
           setPlaying(false);
           setPaused(false);
@@ -288,7 +281,7 @@ export default function Reader({
     for (const u of queue) {
       speechSynthesis.speak(u);
     }
-  }, [findWordIndexFromChar, pause, resume, stopAll, rate, pitch, text, voiceName, voices, words, paused]);
+  }, [findWordIndexFromChar, pause, resume, stopAll, rate, pitch, text, voiceName, voices, words, paused, plainText]);
 
   useEffect(() => {
     return () => stopAll();
@@ -325,17 +318,11 @@ export default function Reader({
       </Controls>
 
       <TextBox ref={containerRef}>
-        {words.map((w, i) => (
-          <Word
-            key={i}
-            data-w={i}
-            $active={i === currentWordIdx}
-            $recent={i >= 0 && i < currentWordIdx && i >= currentWordIdx - 5}
-          >
-            {w}
-            {" "}
-          </Word>
-        ))}
+        <FormattedText
+          text={text}
+          currentWordIdx={currentWordIdx}
+          recentWordIdxs={recentWordIdxs}
+        />
       </TextBox>
     </Wrap>
   );
