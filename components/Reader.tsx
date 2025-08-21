@@ -111,6 +111,7 @@ export default function Reader({
   });
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [chapterInfo, setChapterInfo] = useState<{ startPage: number; endPage: number } | null>(null);
+  const [pageChangeTimeout, setPageChangeTimeout] = useState<NodeJS.Timeout | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<boolean>(false);
@@ -190,6 +191,27 @@ export default function Reader({
     }
   }, [activeChapter, book]);
 
+  // Function to analyze content density based on text structure
+  const analyzeContentDensity = useCallback((text: string) => {
+    const lines = text.split('\n');
+    let paragraphCount = 0, headingCount = 0;
+
+    for (const line of lines) {
+      if (/^#+\s/.test(line)) headingCount++;
+      if (line.trim() === '') paragraphCount++;
+    }
+
+    // Calculate a density factor based on the structure
+    // More paragraphs and fewer headings typically mean denser content
+    const structureFactor = Math.min(1.5, Math.max(0.5,
+      1 + (paragraphCount / lines.length) * 0.5 - (headingCount / lines.length) * 0.3
+    ));
+
+    console.log(`Content analysis: ${paragraphCount} paragraphs, ${headingCount} headings, density factor: ${structureFactor.toFixed(2)}`);
+
+    return structureFactor;
+  }, []);
+
   // Scroll current word into view and sync PDF page
   useEffect(() => {
     if (currentWordIdx < 0) return;
@@ -202,20 +224,59 @@ export default function Reader({
       }
     }
 
-    // Estimate PDF page based on word position
-    // This is a simple estimation - for a more accurate mapping, we would need
-    // to get page information from the server for each word
+    // Sync PDF page based on word position
     if ((viewMode === 'pdf-only' || viewMode === 'split') && chapterInfo) {
-      const wordPosition = currentWordIdx / words.length;
+      console.log(`Syncing PDF page for word index ${currentWordIdx} of ${words.length}`);
+
+      // Improved estimation algorithm with content density analysis
       const { startPage, endPage } = chapterInfo;
       const totalPages = endPage - startPage + 1;
-      const estimatedPage = Math.max(startPage, Math.floor(startPage + wordPosition * totalPages));
+
+      // Get content density factor
+      const densityFactor = analyzeContentDensity(text);
+
+      // Non-linear mapping function with density adjustment
+      const wordPosition = currentWordIdx / words.length;
+
+      // Adjust the non-linear mapping based on content density
+      // For denser content, use a more linear mapping (higher exponent)
+      // For sparser content, use a more non-linear mapping (lower exponent)
+      const exponent = 0.5 * densityFactor; // Adjust the square root based on density
+      const nonLinearPosition = Math.pow(wordPosition, exponent);
+
+      const estimatedPage = Math.max(
+        startPage, 
+        Math.min(
+          endPage,
+          Math.floor(startPage + nonLinearPosition * totalPages)
+        )
+      );
+
+      console.log(`Word position: ${wordPosition.toFixed(4)}, Non-linear position: ${nonLinearPosition.toFixed(4)}, Density factor: ${densityFactor.toFixed(2)}`);
+      console.log(`Estimated page: ${estimatedPage} (chapter pages: ${startPage}-${endPage})`);
 
       if (estimatedPage !== currentPage) {
-        setCurrentPage(estimatedPage);
+        console.log(`Updating PDF page from ${currentPage} to ${estimatedPage}`);
+
+        // Clear any existing timeout
+        if (pageChangeTimeout) {
+          clearTimeout(pageChangeTimeout);
+        }
+
+        // Set a new timeout with delay based on how far we're jumping
+        // Larger jumps get a longer delay to prevent rapid flickering
+        const jumpSize = Math.abs(estimatedPage - currentPage);
+        const delay = Math.min(500, jumpSize * 100); // 100ms per page, max 500ms
+
+        const timeout = setTimeout(() => {
+          console.log(`Debounced page change: ${currentPage} -> ${estimatedPage} (delay: ${delay}ms)`);
+          setCurrentPage(estimatedPage);
+        }, delay);
+
+        setPageChangeTimeout(timeout);
       }
     }
-  }, [currentWordIdx, autoScroll, viewMode, words.length, chapterInfo, currentPage]);
+  }, [currentWordIdx, autoScroll, viewMode, words.length, chapterInfo, currentPage, text, analyzeContentDensity, pageChangeTimeout]);
 
   const findWordIndexFromChar = useCallback((globalCharIdx: number) => {
     // binary search
@@ -388,26 +449,115 @@ export default function Reader({
     }
   }, []);
 
+  // Function to manually sync PDF page with current text position
+  const syncPdfWithText = useCallback(() => {
+    if (currentWordIdx >= 0 && chapterInfo) {
+      console.log(`Manual sync: Syncing PDF page for word index ${currentWordIdx} of ${words.length}`);
+
+      const { startPage, endPage } = chapterInfo;
+      const totalPages = endPage - startPage + 1;
+
+      // Get content density factor
+      const densityFactor = analyzeContentDensity(text);
+
+      // Use the improved non-linear mapping with density adjustment
+      const wordPosition = currentWordIdx / words.length;
+      const exponent = 0.5 * densityFactor; // Adjust the square root based on density
+      const nonLinearPosition = Math.pow(wordPosition, exponent);
+
+      const estimatedPage = Math.max(
+        startPage, 
+        Math.min(
+          endPage,
+          Math.floor(startPage + nonLinearPosition * totalPages)
+        )
+      );
+
+      console.log(`Manual sync: Word position: ${wordPosition.toFixed(4)}, Non-linear position: ${nonLinearPosition.toFixed(4)}, Density factor: ${densityFactor.toFixed(2)}`);
+      console.log(`Manual sync: Setting PDF page to ${estimatedPage} (chapter pages: ${startPage}-${endPage})`);
+
+      setCurrentPage(estimatedPage);
+    } else {
+      console.log('Manual sync: Cannot sync - no current word or chapter info');
+    }
+  }, [currentWordIdx, words.length, chapterInfo, text, analyzeContentDensity]);
+
+  // Function to manually sync text position with current PDF page
+  const syncTextWithPdf = useCallback(() => {
+    if (chapterInfo && words.length > 0) {
+      console.log(`Manual sync: Syncing text position for page ${currentPage} (chapter pages: ${chapterInfo.startPage}-${chapterInfo.endPage})`);
+
+      const { startPage, endPage } = chapterInfo;
+      const totalPages = endPage - startPage + 1;
+
+      // Get content density factor
+      const densityFactor = analyzeContentDensity(text);
+
+      // Use the improved inverse non-linear mapping with density adjustment
+      const relativePosition = Math.max(0, Math.min(1, (currentPage - startPage) / totalPages));
+      const inverseExponent = 2.0 / densityFactor; // Inverse of the exponent used in text-to-PDF
+      const nonLinearPosition = Math.pow(relativePosition, inverseExponent);
+
+      const estimatedWordIdx = Math.floor(nonLinearPosition * words.length);
+
+      console.log(`Manual sync: Page relative position: ${relativePosition.toFixed(4)}, Non-linear position: ${nonLinearPosition.toFixed(4)}, Density factor: ${densityFactor.toFixed(2)}`);
+      console.log(`Manual sync: Setting word index to ${estimatedWordIdx} of ${words.length}`);
+
+      const boundedWordIdx = Math.max(0, Math.min(estimatedWordIdx, words.length - 1));
+      setCurrentWordIdx(boundedWordIdx);
+    } else {
+      console.log('Manual sync: Cannot sync - no chapter info or words');
+    }
+  }, [currentPage, chapterInfo, words.length, text, analyzeContentDensity]);
+
   const handlePageChange = useCallback((page: number) => {
     setCurrentPage(page);
+    console.log(`PDF page changed to ${page}`);
 
     // Synchronize text position when PDF page changes
     if (chapterInfo && words.length > 0) {
       const { startPage, endPage } = chapterInfo;
       const totalPages = endPage - startPage + 1;
 
+      console.log(`Syncing text position for page ${page} (chapter pages: ${startPage}-${endPage})`);
+
+      // Get content density factor
+      const densityFactor = analyzeContentDensity(text);
+
       // Calculate relative position in the chapter
       const relativePosition = Math.max(0, Math.min(1, (page - startPage) / totalPages));
 
-      // Estimate word index based on relative position
-      const estimatedWordIdx = Math.floor(relativePosition * words.length);
+      // Use inverse of the non-linear mapping used in text-to-PDF sync
+      // Adjust based on content density (inverse of the exponent used in text-to-PDF)
+      const inverseExponent = 2.0 / densityFactor; // Inverse of the exponent used in text-to-PDF
+      const nonLinearPosition = Math.pow(relativePosition, inverseExponent);
+
+      // Estimate word index based on non-linear position
+      const estimatedWordIdx = Math.floor(nonLinearPosition * words.length);
+
+      console.log(`Page relative position: ${relativePosition.toFixed(4)}, Non-linear position: ${nonLinearPosition.toFixed(4)}, Density factor: ${densityFactor.toFixed(2)}`);
+      console.log(`Estimated word index: ${estimatedWordIdx} of ${words.length}`);
 
       // Only update if not currently playing
       if (!playing && !paused) {
-        setCurrentWordIdx(Math.max(0, Math.min(estimatedWordIdx, words.length - 1)));
+        // Clear any existing timeout
+        if (pageChangeTimeout) {
+          clearTimeout(pageChangeTimeout);
+        }
+
+        // Set a new timeout with a short delay to prevent rapid changes
+        const timeout = setTimeout(() => {
+          const boundedWordIdx = Math.max(0, Math.min(estimatedWordIdx, words.length - 1));
+          console.log(`Debounced word index update: ${boundedWordIdx}`);
+          setCurrentWordIdx(boundedWordIdx);
+        }, 200); // 200ms delay for debouncing
+
+        setPageChangeTimeout(timeout);
+      } else {
+        console.log(`Not updating word index because reader is ${playing ? 'playing' : 'paused'}`);
       }
     }
-  }, [chapterInfo, words.length, playing, paused]);
+  }, [chapterInfo, words.length, playing, paused, text, analyzeContentDensity, pageChangeTimeout]);
 
   return (
     <Wrap>
@@ -460,6 +610,50 @@ export default function Reader({
                   value={pitch} onChange={e => setPitch(parseFloat(e.target.value))}/>
           </label>
         </Controls>
+      )}
+
+      {/* Manual sync controls for split view */}
+      {viewMode === 'split' && (
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          gap: '1rem', 
+          marginBottom: '1rem',
+          padding: '0.5rem',
+          backgroundColor: '#f8f8f8',
+          borderRadius: '0.5rem',
+          border: '1px solid #eee'
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>Sync Controls</p>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button 
+                onClick={syncPdfWithText}
+                title="Update PDF page to match current text position"
+                style={{ 
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#e6f7ff',
+                  border: '1px solid #91d5ff',
+                  borderRadius: '0.25rem'
+                }}
+              >
+                Sync PDF → Text
+              </button>
+              <button 
+                onClick={syncTextWithPdf}
+                title="Update text position to match current PDF page"
+                style={{ 
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#f6ffed',
+                  border: '1px solid #b7eb8f',
+                  borderRadius: '0.25rem'
+                }}
+              >
+                Sync Text → PDF
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {viewMode === 'text-only' && (

@@ -14,11 +14,12 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerPath;
 export const PDF_DIR = path.resolve(process.cwd(), "public", "pdfs");
 
 // Text cleaning and formatting function
-function cleanAndFormatText(rawText: string): string {
+function cleanAndFormatText(rawText: string, lastSeenChapterTitle: string | null = null): { text: string; chapterTitle: string | null } {
   // Split text into lines for processing
   const lines = rawText.split('\n');
   const blocks: { type: string; content: string }[] = [];
   let currentBlock: { type: string; content: string } | null = null;
+  let detectedChapterTitle: string | null = null;
 
   // Process each line
   for (let i = 0; i < lines.length; i++) {
@@ -31,8 +32,20 @@ function cleanAndFormatText(rawText: string): string {
 
     // Detect block type
     if (isChapterHeading(line)) {
+      const formattedHeading = formatHeading(line);
+
+      // Check if this is a duplicate chapter title
+      if (lastSeenChapterTitle && formattedHeading.toLowerCase() === lastSeenChapterTitle.toLowerCase()) {
+        // Skip this heading as it's a duplicate
+        console.log(`Skipping duplicate chapter title: ${formattedHeading}`);
+        continue;
+      }
+
+      // Store the chapter title we found
+      detectedChapterTitle = formattedHeading;
+
       if (currentBlock) blocks.push(currentBlock);
-      currentBlock = { type: 'heading', content: formatHeading(line) };
+      currentBlock = { type: 'heading', content: formattedHeading };
       blocks.push(currentBlock);
       currentBlock = null;
     } else if (isBulletPoint(line)) {
@@ -75,7 +88,7 @@ function cleanAndFormatText(rawText: string): string {
   if (currentBlock) blocks.push(currentBlock);
 
   // Convert blocks to formatted text
-  return blocks.map(block => {
+  const text = blocks.map(block => {
     switch (block.type) {
       case 'heading':
         return block.content;
@@ -90,6 +103,8 @@ function cleanAndFormatText(rawText: string): string {
         return block.content;
     }
   }).join('\n\n');
+
+  return { text, chapterTitle: detectedChapterTitle };
 }
 
 // Helper functions
@@ -222,6 +237,13 @@ export async function listBooks(): Promise<string[]> {
 
 type Chapter = { id: number; title: string; startPage: number; endPage: number };
 
+// Patterns to detect table of contents
+const TOC_PATTERNS = [
+  /^\s*table\s+of\s+contents\s*$/i,
+  /^\s*contents\s*$/i,
+  /^(table\s+)?of\s+contents$/i
+];
+
 const CHAPTER_PATTERNS = [
   /^\s*chapter\s+\d+\s*:/i,
   /^\s*chapter\s+\d+\s*[a-zA-Z]/i,
@@ -316,7 +338,7 @@ export async function extractChapters(bookFileName: string): Promise<Chapter[]> 
   const numPages: number = pdf.numPages;
   console.log(`PDF loaded with ${numPages} pages`);
 
-  type Hit = { page: number; title: string };
+  type Hit = { page: number; title: string; type?: 'toc' | 'chapter' };
   const hits: Hit[] = [];
 
   // Scan first ~50 lines per page for heading candidates
@@ -333,6 +355,22 @@ export async function extractChapters(bookFileName: string): Promise<Chapter[]> 
       const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 60);
       console.log(`Found ${lines.length} lines of text on page ${i}`);
 
+      // Check for TOC first
+      const tocLine = lines.find(ln => TOC_PATTERNS.some(re => re.test(ln)));
+      if (tocLine) {
+        console.log(`Found table of contents on page ${i}: "${tocLine}"`);
+        hits.push({ page: i, title: "Table of Contents", type: 'toc' });
+        continue; // Skip regular chapter detection for this page
+      }
+
+      // Also check for lines containing "contents" or "table of contents" in a case-insensitive way
+      const contentLine = lines.find(ln => /contents|table of contents/i.test(ln));
+      if (contentLine && !tocLine) {
+        console.log(`Found potential table of contents on page ${i}: "${contentLine}"`);
+        hits.push({ page: i, title: "Table of Contents", type: 'toc' });
+        continue; // Skip regular chapter detection for this page
+      }
+
       const found = lines.find((ln) => 
         CHAPTER_PATTERNS.some((re) => re.test(ln)) || 
         looksLikeChapterHeading(ln) || 
@@ -340,7 +378,7 @@ export async function extractChapters(bookFileName: string): Promise<Chapter[]> 
       );
       if (found) {
         console.log(`Found chapter heading on page ${i}: "${found}"`);
-        hits.push({ page: i, title: found.replace(/\s+/g, " ").trim() });
+        hits.push({ page: i, title: found.replace(/\s+/g, " ").trim(), type: 'chapter' });
       }
     } catch (err) {
       console.error(`Error processing page ${i}:`, err);
@@ -353,10 +391,49 @@ export async function extractChapters(bookFileName: string): Promise<Chapter[]> 
   if (hits.length === 0) {
     chapters = [{ id: 1, title: "Full Document", startPage: 1, endPage: numPages }];
   } else {
-    // Dedup similar headings and build ranges
+    // First, extract TOC hits
+    const tocHits = hits.filter(h => h.type === 'toc');
+    const chapterHits = hits.filter(h => h.type !== 'toc');
+
+    console.log(`Found ${tocHits.length} TOC hits and ${chapterHits.length} chapter hits`);
+
+    // Process TOC hits to determine TOC page range
+    let tocStartPage = 0;
+    let tocEndPage = 0;
+
+    if (tocHits.length > 0) {
+      // Sort TOC hits by page number
+      tocHits.sort((a, b) => a.page - b.page);
+      tocStartPage = tocHits[0].page;
+
+      // Estimate TOC end page - typically TOC spans 1-3 pages
+      // Find the next non-TOC hit after the TOC to determine the end page
+      const nextHitAfterToc = hits
+        .filter(h => h.type !== 'toc' && h.page > tocStartPage)
+        .sort((a, b) => a.page - b.page)[0];
+
+      if (nextHitAfterToc) {
+        tocEndPage = nextHitAfterToc.page - 1;
+      } else {
+        // If no hit after TOC, estimate 2 pages for TOC
+        tocEndPage = tocStartPage + 2;
+      }
+
+      console.log(`Table of Contents detected: pages ${tocStartPage}-${tocEndPage}`);
+
+      // Add TOC as a special chapter with id 0
+      chapters.push({ 
+        id: 0, 
+        title: "Table of Contents", 
+        startPage: tocStartPage, 
+        endPage: tocEndPage 
+      });
+    }
+
+    // Dedup similar headings and build ranges for regular chapters
     const uniq: Hit[] = [];
-    for (let i = 0; i < hits.length; i++) {
-      const current = hits[i];
+    for (let i = 0; i < chapterHits.length; i++) {
+      const current = chapterHits[i];
       const prev = uniq[uniq.length - 1];
 
       // Skip if this is the same heading on a different page
@@ -384,6 +461,12 @@ export async function extractChapters(bookFileName: string): Promise<Chapter[]> 
       if (/^\s*chapter\b/i.test(title)) {
         title = title.replace(/^\s*chapter\s*/i, "").replace(/\s+/g, " ").trim();
         title = `Chapter ${title}`;
+      }
+
+      // Skip if this page is within TOC range
+      if (tocStartPage > 0 && start >= tocStartPage && start <= tocEndPage) {
+        console.log(`Skipping chapter that overlaps with TOC: ${title} (page ${start})`);
+        continue;
       }
 
       chapters.push({ id: i + 1, title, startPage: start, endPage: end });
@@ -472,6 +555,8 @@ export async function extractTextForRange(bookFileName: string, startPage: numbe
   const e = Math.min(endPage, pdf.numPages);
   console.log(`Extracting text from pages ${s} to ${e}`);
 
+  let lastSeenChapterTitle: string | null = null;
+
   for (let i = s; i <= e; i++) {
     try {
       console.log(`Processing page ${i}/${e}`);
@@ -481,7 +566,16 @@ export async function extractTextForRange(bookFileName: string, startPage: numbe
       const items = tc.items as Array<{ str: string }>;
       const pageText = items.map((it) => it.str).join("\n");
       console.log(`Extracted ${pageText.length} characters from page ${i}`);
-      parts.push(pageText);
+
+      // Apply text cleaning with chapter title tracking
+      const { text: cleanedText, chapterTitle } = cleanAndFormatText(pageText, lastSeenChapterTitle);
+
+      // Update the last seen chapter title if we found one
+      if (chapterTitle) {
+        lastSeenChapterTitle = chapterTitle;
+      }
+
+      parts.push(cleanedText);
     } catch (err) {
       console.error(`Error processing page ${i}:`, err);
       // Continue with next page
@@ -497,6 +591,7 @@ export async function extractTextForRange(bookFileName: string, startPage: numbe
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  // Apply advanced text cleaning and formatting
-  return cleanAndFormatText(text);
+  // Apply advanced text cleaning and formatting for the entire text
+  // This is a final pass to ensure consistent formatting
+  return cleanAndFormatText(text, null).text;
 }
