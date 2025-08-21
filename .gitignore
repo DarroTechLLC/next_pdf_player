@@ -24,3 +24,4 @@ pnpm-lock.yaml
 
 # Ignore all PDFs
 *.pdf
+todo.txt
